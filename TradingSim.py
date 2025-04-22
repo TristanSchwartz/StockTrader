@@ -28,8 +28,113 @@ logging.basicConfig(
     ]
 )
 
+def run_single_strategy(strategy_class, initial_cash=10000, commission=0, data_dict=None, plot=False):
+    """
+    Run a single trading strategy and return performance metrics.
+    
+    Parameters:
+    - strategy_class: The strategy class to backtest
+    - initial_cash: Starting capital
+    - commission: Trading commission rate
+    - data_dict: Dictionary of price data {ticker: dataframe}
+    - plot: Whether to plot the results
+    
+    Returns:
+    - Dictionary of performance metrics
+    """
+    if not data_dict:
+        return None
+    
+    # Create a cerebro instance
+    cerebro = bt.Cerebro()
+    
+    # Add data feeds
+    for ticker, df in data_dict.items():
+        # Convert to bt.feeds.PandasData
+        data = bt.feeds.PandasData(
+            dataname=df,
+            name=ticker
+        )
+        cerebro.adddata(data)
+    
+    # Add strategy
+    cerebro.addstrategy(strategy_class)
+    
+    # Set initial cash
+    cerebro.broker.setcash(initial_cash)
+    
+    # Set commission
+    cerebro.broker.setcommission(commission=commission)
+    
+    # Add analyzers
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe')
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
+    cerebro.addanalyzer(bt.analyzers.Returns, _name='returns')
+    
+    # Run backtest
+    results = cerebro.run()
+    
+    # Extract metrics
+    strategy = results[0]
+    
+    # Plot if requested
+    if plot:
+        cerebro.plot(style='candlestick', barup='green', bardown='red')
+    
+    # Return performance metrics
+    return {
+        'strategy': strategy_class.__name__,
+        'final_value': cerebro.broker.getvalue(),
+        'return': strategy.analyzers.returns.get_analysis()['rtot'],
+        'sharpe': strategy.analyzers.sharpe.get_analysis()['sharperatio'],
+        'max_drawdown': strategy.analyzers.drawdown.get_analysis()['max']['drawdown'],
+        'max_drawdown_money': strategy.analyzers.drawdown.get_analysis()['max']['moneydown']
+    }
+
+def compare_strategies(strategies, initial_cash=10000, commission=0.001, data_dict=None):
+    """
+    Compare multiple trading strategies and return performance metrics.
+    
+    Parameters:
+    - strategies: List of strategy classes to backtest
+    - initial_cash: Starting capital
+    - commission: Trading commission rate
+    - data_dict: Dictionary of price data {ticker: dataframe}
+    
+    Returns:
+    - DataFrame of performance metrics for each strategy
+    """
+    if not data_dict:
+        return None
+    
+    results = []
+    
+    for strategy in strategies:
+        strategy_name = strategy.__name__
+        logging.info(f"Running strategy: {strategy_name}")
+        
+        try:
+            result = run_single_strategy(
+                strategy,
+                initial_cash=initial_cash,
+                commission=commission,
+                data_dict=data_dict
+            )
+            
+            if result:
+                results.append(result)
+                
+        except Exception as e:
+            logging.error(f"Error running {strategy_name}: {e}")
+    
+    if not results:
+        return None
+    
+    # Convert results to DataFrame
+    return pd.DataFrame(results)
+
 def run_trading_simulation(mode='compare', strategy_name=None, initial_cash=10000, 
-                          commission=0.001, data_limit=None, adaptive=False):
+                          commission=0, data_limit=None, adaptive=False):
     """
     Main function to run the trading simulation.
     
